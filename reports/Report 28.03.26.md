@@ -16,7 +16,7 @@
     2. Сканирование 
 - Переработал интерфейс показа, теперь это отдельное вспыващее окно.
 
- <img width="454" alt="video" src="https://raw.githubusercontent.com/vadimpopov1/Swift_Auditorium/7bc54bd5d2ab1e250827cf88fe91e2c4bc934daf/reports/assets/show.MP4" />
+ <img width="454" alt="gif" src="https://raw.githubusercontent.com/vadimpopov1/Swift_Auditorium/7bc54bd5d2ab1e250827cf88fe91e2c4bc934daf/reports/assets/show_func.gif" />
 
   ## TODO:
     - Начать работу над передачей данных.
