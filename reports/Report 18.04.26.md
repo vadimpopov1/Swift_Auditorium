@@ -11,4 +11,4 @@
 - После успешной авторизации происходит переход на главный экран приложения.
 
 
- <img width="200" alt="gif" src="https://github.com/vadimpopov1/Swift_Auditorium/blob/efa369e3325f4459381a376b645e27144d3cb0a9/reports/assets/show_func2.gif" />
+ <img width="200" alt="gif" src="https://github.com/vadimpopov1/Swift_Auditorium/blob/4b18bf67842f10d3f20b8151499523fe8732937f/reports/assets/show_func2.gif" />
