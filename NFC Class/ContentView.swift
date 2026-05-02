@@ -15,10 +15,13 @@ enum AuthScreen {
 
 struct AuthView: View {
     @Binding var isLoggedIn: Bool
+    @Binding var userProfile: UserProfile?
+
     @State private var currentScreen: AuthScreen = .login
     @State private var login = ""
     @State private var password = ""
     @State private var confirmPassword = ""
+    @State private var inviteCode = ""
     @State private var alertMessage = ""
     @State private var showAlert = false
     @State private var isLoading = false
@@ -39,6 +42,11 @@ struct AuthView: View {
             if currentScreen == .register {
                 SecureField("Повторите пароль", text: $confirmPassword)
                     .textFieldStyle(RoundedBorderTextFieldStyle())
+
+                TextField("Пригласительный код", text: $inviteCode)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .autocapitalization(.allCharacters)
+                    .disableAutocorrection(true)
             }
 
             Button(action: handleAction) {
@@ -55,7 +63,9 @@ struct AuthView: View {
             .disabled(isLoading)
 
             Button(action: switchScreen) {
-                Text(currentScreen == .login ? "Нет аккаунта? Зарегистрироваться" : "Уже есть аккаунт? Войти")
+                Text(currentScreen == .login
+                     ? "Нет аккаунта? Зарегистрироваться"
+                     : "Уже есть аккаунт? Войти")
                     .foregroundColor(.blue)
             }
         }
@@ -70,7 +80,7 @@ struct AuthView: View {
     private func switchScreen() {
         withAnimation {
             currentScreen = currentScreen == .login ? .register : .login
-            login = ""; password = ""; confirmPassword = ""
+            login = ""; password = ""; confirmPassword = ""; inviteCode = ""
         }
     }
 
@@ -78,18 +88,26 @@ struct AuthView: View {
         guard !login.isEmpty, !password.isEmpty else {
             return show("Введите логин и пароль")
         }
-        if currentScreen == .register && password != confirmPassword {
-            return show("Пароли не совпадают")
+        if currentScreen == .register {
+            guard password == confirmPassword else { return show("Пароли не совпадают") }
+            guard !inviteCode.isEmpty else { return show("Введите пригласительный код") }
         }
         isLoading = true
         Task {
             defer { Task { @MainActor in isLoading = false } }
             do {
                 if currentScreen == .login {
-                    _ = try await APIService.shared.login(login: login, password: password)
-                    await MainActor.run { isLoggedIn = true }
+                    let profile = try await APIService.shared.login(login: login, password: password)
+                    await MainActor.run {
+                        userProfile = profile
+                        isLoggedIn = true
+                    }
                 } else {
-                    _ = try await APIService.shared.register(login: login, password: password)
+                    _ = try await APIService.shared.registerByInvite(
+                        inviteCode: inviteCode,
+                        login: login,
+                        password: password
+                    )
                     await MainActor.run { switchScreen(); show("Регистрация успешна! Войдите в аккаунт.") }
                 }
             } catch {
@@ -106,25 +124,40 @@ struct AuthView: View {
 
 struct ContentView: View {
     @State private var isLoggedIn = false
+    @State private var userProfile: UserProfile?
 
     var body: some View {
-        if isLoggedIn {
-            MainAppView()
+        if isLoggedIn, let profile = userProfile {
+            MainAppView(profile: profile, onLogout: {
+                APIService.shared.logout()
+                userProfile = nil
+                isLoggedIn = false
+            })
         } else {
-            AuthView(isLoggedIn: $isLoggedIn)
+            AuthView(isLoggedIn: $isLoggedIn, userProfile: $userProfile)
         }
     }
 }
 
 struct MainAppView: View {
-    let urlString = "https://sibsutis.ru"
+    let profile: UserProfile
+    let onLogout: () -> Void
+
     @State private var showingQR = false
     @State private var showingScanner = false
+    @State private var showingProfile = false
+    @State private var showLogoutConfirm = false
+
+    let urlString = "https://sibsutis.ru"
 
     var body: some View {
         ZStack {
-            VStack {
+            VStack(spacing: 0) {
+                ProfileCardView(profile: profile, onLogout: { showLogoutConfirm = true })
+                    .padding()
+
                 Spacer()
+
                 HStack {
                     Button(action: { showingQR = true }) {
                         Image(systemName: "qrcode")
@@ -159,6 +192,68 @@ struct MainAppView: View {
                 }
             })
         }
+        .confirmationDialog("Выйти из аккаунта?", isPresented: $showLogoutConfirm, titleVisibility: .visible) {
+            Button("Выйти", role: .destructive) { onLogout() }
+            Button("Отмена", role: .cancel) {}
+        }
+    }
+}
+
+struct ProfileCardView: View {
+    let profile: UserProfile
+    let onLogout: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top) {
+                ZStack {
+                    Circle()
+                        .fill(profile.role == "teacher" ? Color.blue.opacity(0.15) : Color.green.opacity(0.15))
+                        .frame(width: 56, height: 56)
+                    Image(systemName: profile.roleIcon)
+                        .font(.title2)
+                        .foregroundColor(profile.role == "teacher" ? .blue : .green)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(profile.login)
+                        .font(.title3).bold()
+                        .lineLimit(1)
+                    Label(profile.roleDisplayName, systemImage: profile.roleIcon)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer()
+
+                Button(action: onLogout) {
+                    Image(systemName: "rectangle.portrait.and.arrow.right")
+                        .font(.caption)
+                        .foregroundColor(.red.opacity(0.8))
+                        .padding(10)
+                        .background(Color.red.opacity(0.08))
+                        .clipShape(Circle())
+                }
+            }
+
+            Divider()
+
+            HStack {
+                Image(systemName: "number.circle.fill")
+                    .foregroundColor(.secondary)
+                Text("ID пользователя:")
+                    .foregroundColor(.secondary)
+                    .font(.subheadline)
+                Spacer()
+                Text(profile.userID)
+                    .font(.subheadline).bold()
+                    .foregroundColor(.primary)
+            }
+        }
+        .padding(16)
+        .background(.ultraThinMaterial)
+        .cornerRadius(20)
+        .shadow(color: .black.opacity(0.07), radius: 8, x: 0, y: 4)
     }
 }
 
