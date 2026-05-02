@@ -18,8 +18,4 @@
 - В карточке профиля добавлена кнопка выхода.
 - При нажатии появляется системный диалог подтверждения после подтверждения JWT-токен сбрасывается и пользователь возвращается на экран входа.
 
-<img width="200" alt="gif" src="https://github.com/vadimpopov1/Swift_Auditorium/blob/dc0e0e52ad4f2fdcb64b7282a3f5c83ddf3542a8/reports/assets/show_anim_reg.gif" /> |
-
-<img width="200" alt="gif" src="https://github.com/vadimpopov1/Swift_Auditorium/blob/dc0e0e52ad4f2fdcb64b7282a3f5c83ddf3542a8/reports/assets/show_st_test.PNG" /> |
-
-<img width="200" alt="gif" src="https://github.com/vadimpopov1/Swift_Auditorium/blob/dc0e0e52ad4f2fdcb64b7282a3f5c83ddf3542a8/reports/assets/show_te_test.PNG" />
+<img width="200" alt="gif" src="https://github.com/vadimpopov1/Swift_Auditorium/blob/dc0e0e52ad4f2fdcb64b7282a3f5c83ddf3542a8/reports/assets/show_anim_reg.gif" /> <img width="200" alt="gif" src="https://github.com/vadimpopov1/Swift_Auditorium/blob/dc0e0e52ad4f2fdcb64b7282a3f5c83ddf3542a8/reports/assets/show_st_test.PNG" /> <img width="200" alt="gif" src="https://github.com/vadimpopov1/Swift_Auditorium/blob/dc0e0e52ad4f2fdcb64b7282a3f5c83ddf3542a8/reports/assets/show_te_test.PNG" />
