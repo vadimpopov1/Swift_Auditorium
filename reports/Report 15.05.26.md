@@ -16,4 +16,4 @@
 - Перенесена кнопка на центр
 - Изменен запрос, который перенаправляет студента для отметки посещаемости с дополнительными данными.
 
- <img width="200" alt="gif" src="https://github.com/vadimpopov1/Swift_Auditorium/blob/4b18bf67842f10d3f20b8151499523fe8732937f/reports/assets/show_func3.gif" />
+ <img width="200" alt="gif" src="https://github.com/vadimpopov1/Swift_Auditorium/blob/007b411637f5ce0ca867d65a7143ae10960199c7/reports/assets/show_fucn3.gif" />
