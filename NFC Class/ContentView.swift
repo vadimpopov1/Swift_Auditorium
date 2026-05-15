@@ -143,46 +143,36 @@ struct MainAppView: View {
     let profile: UserProfile
     let onLogout: () -> Void
 
-    @State private var showingQR = false
     @State private var showingScanner = false
-    @State private var showingProfile = false
     @State private var showLogoutConfirm = false
 
-    let urlString = "https://sibsutis.ru"
-
     var body: some View {
-        ZStack {
-            VStack(spacing: 0) {
-                ProfileCardView(profile: profile, onLogout: { showLogoutConfirm = true })
-                    .padding()
+        VStack(spacing: 0) {
+            ProfileCardView(profile: profile, onLogout: { showLogoutConfirm = true })
+                .padding()
 
+            if profile.role == "teacher" {
+                TeacherAttendanceView()
+            } else {
                 Spacer()
 
-                HStack {
-                    Button(action: { showingQR = true }) {
-                        Image(systemName: "qrcode")
-                            .font(.title)
-                            .frame(width: 60, height: 60)
-                            .glassEffect()
-                            .clipShape(Circle())
-                            .shadow(radius: 5)
-                    }
-                    Spacer()
-                    Button(action: { showingScanner = true }) {
+                Button(action: { showingScanner = true }) {
+                    VStack(spacing: 8) {
                         Image(systemName: "qrcode.viewfinder")
-                            .font(.title)
-                            .frame(width: 60, height: 60)
-                            .glassEffect()
-                            .clipShape(Circle())
-                            .shadow(radius: 5)
+                            .font(.system(size: 48))
+                        Text("Отметить посещение")
+                            .font(.headline)
                     }
+                    .frame(maxWidth: .infinity)
+                    .padding(30)
+                    .background(.ultraThinMaterial)
+                    .cornerRadius(20)
+                    .shadow(color: .black.opacity(0.06), radius: 6, x: 0, y: 3)
                 }
                 .padding(.horizontal, 30)
-                .padding(.bottom, 30)
+
+                Spacer()
             }
-        }
-        .fullScreenCover(isPresented: $showingQR) {
-            QRView(urlString: urlString, onClose: { showingQR = false })
         }
         .fullScreenCover(isPresented: $showingScanner) {
             QRScannerView(onCodeScanned: { scannedCode in
