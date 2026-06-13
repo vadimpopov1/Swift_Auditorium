@@ -27,4 +27,4 @@ private var deviceIdentifier: String {
 ## Fixes
 - Обновлены методы студенческого считывателя QR кодов, в связи с этмм исправлен ряд проблем с неработой авторизации на занятиях.
 
- <img width="200" alt="gif" src="https://github.com/vadimpopov1/Swift_Auditorium/blob/4b18bf67842f10d3f20b8151499523fe8732937f/reports/assets/show_func2.gif" />
+ <img width="200" alt="gif" src="https://github.com/vadimpopov1/Swift_Auditorium/blob/8de7ce5087814a59b81f2038c0dcb66d6032dfa1/reports/assets/show_func.png" />
