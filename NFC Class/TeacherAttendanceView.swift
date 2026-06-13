@@ -14,14 +14,27 @@ struct TeacherAttendanceView: View {
     @State private var session: AttendanceSession?
     @State private var stats: AttendanceGroupStats?
 
+    @State private var currentAttendance: Int = 0
+    @State private var secondsRemaining: Int = 0
+
     @State private var isCreatingSession = false
     @State private var isLoadingStats = false
     @State private var showingQR = false
     @State private var alertMessage = ""
     @State private var showAlert = false
 
+    @State private var tickTimer: Timer?
+    @State private var networkTimer: Timer?
+
     private let groupID = 469
     private let subjectID = 1
+
+    var timeRemainingText: String {
+        guard secondsRemaining > 0 else { return "Истекло" }
+        let m = secondsRemaining / 60
+        let s = secondsRemaining % 60
+        return String(format: "%d мин %02d сек", m, s)
+    }
 
     var body: some View {
         NavigationView {
@@ -36,7 +49,13 @@ struct TeacherAttendanceView: View {
                 .padding()
             }
             .navigationTitle("Посещаемость")
-            .onAppear { loadStats() }
+            .onAppear {
+                loadStats()
+                loadActiveSession()
+            }
+            .onDisappear {
+                stopTimers()
+            }
             .alert("Ошибка", isPresented: $showAlert) {
                 Button("OK", role: .cancel) {}
             } message: {
@@ -98,8 +117,8 @@ struct TeacherAttendanceView: View {
             Divider()
 
             infoRow(icon: "book.fill", label: "Занятие", value: session.lessonName)
-            infoRow(icon: "person.3.fill", label: "Студентов в группе", value: "\(session.rosterSize)")
-            infoRow(icon: "clock.fill", label: "Действует", value: "\(session.expiresMinutes) мин")
+            infoRow(icon: "person.3.fill", label: "Студентов", value: "\(currentAttendance) / \(session.rosterSize)")
+            infoRow(icon: "clock.fill", label: "Осталось", value: timeRemainingText)
 
             Button(action: { showingQR = true }) {
                 Label("Показать QR-код", systemImage: "qrcode")
@@ -195,7 +214,6 @@ struct TeacherAttendanceView: View {
         let name = lessonName.isEmpty ? "Занятие" : lessonName
         isCreatingSession = true
         Task {
-            defer { Task { @MainActor in isCreatingSession = false } }
             do {
                 let s = try await APIService.shared.createAttendanceSession(
                     subjectID: subjectID,
@@ -205,28 +223,128 @@ struct TeacherAttendanceView: View {
                 )
                 await MainActor.run {
                     session = s
+                    currentAttendance = 0
+                    secondsRemaining = s.expiresMinutes * 60
                     showingQR = true
+                    isCreatingSession = false
+                    startTimers()
                 }
             } catch {
                 await MainActor.run {
                     alertMessage = error.localizedDescription
                     showAlert = true
+                    isCreatingSession = false
                 }
             }
         }
     }
 
+    private func loadActiveSession() {
+        Task {
+            do {
+                guard let active = try await APIService.shared.getActiveSession() else { return }
+                guard let lessonId = Int(active.lessonID) else { return }
+
+                let (secs, isActive) = try await APIService.shared.getSessionTimer(lessonId: lessonId)
+                guard isActive else { return }
+
+                let (marked, _, _) = try await APIService.shared.getMarkedCount(lessonId: lessonId)
+
+                await MainActor.run {
+                    session = active
+                    secondsRemaining = secs
+                    currentAttendance = marked
+                    startTimers()
+                }
+            } catch {
+                print("loadActiveSession error: \(error)")
+            }
+        }
+    }
+
+    private func fetchNetworkData() async {
+        guard let lessonIdStr = session?.lessonID, let lessonId = Int(lessonIdStr) else { return }
+        do {
+            async let markedResult = APIService.shared.getMarkedCount(lessonId: lessonId)
+            async let timerResult = APIService.shared.getSessionTimer(lessonId: lessonId)
+            let (marked, roster, _) = try await markedResult
+            let (secs, isActive) = try await timerResult
+
+            await MainActor.run {
+                if !isActive {
+                    session = nil
+                    secondsRemaining = 0
+                    stopTimers()
+                    return
+                }
+                currentAttendance = marked
+                secondsRemaining = secs
+                if let s = session, roster != s.rosterSize {
+                    session = AttendanceSession(
+                        inviteToken: s.inviteToken,
+                        joinURL: s.joinURL,
+                        lessonName: s.lessonName,
+                        expiresAt: s.expiresAt,
+                        expiresMinutes: s.expiresMinutes,
+                        rosterSize: roster,
+                        subjectID: s.subjectID,
+                        groupIDs: s.groupIDs,
+                        lessonID: s.lessonID
+                    )
+                }
+            }
+        } catch {
+            print("Network data error: \(error)")
+            let msg = error.localizedDescription.lowercased()
+            if msg.contains("active") || (error as NSError).code == 404 {
+                await MainActor.run {
+                    session = nil
+                    secondsRemaining = 0
+                    stopTimers()
+                }
+            }
+        }
+    }
+
+    private func startTimers() {
+        stopTimers()
+
+        tickTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            guard session != nil else { return }
+            if secondsRemaining > 0 {
+                secondsRemaining -= 1
+            } else {
+                session = nil
+                stopTimers()
+            }
+        }
+
+        networkTimer = Timer.scheduledTimer(withTimeInterval: 15.0, repeats: true) { _ in
+            Task { await fetchNetworkData() }
+        }
+    }
+
+    private func stopTimers() {
+        tickTimer?.invalidate()
+        tickTimer = nil
+        networkTimer?.invalidate()
+        networkTimer = nil
+    }
+
     private func loadStats() {
         isLoadingStats = true
         Task {
-            defer { Task { @MainActor in isLoadingStats = false } }
             do {
                 let s = try await APIService.shared.fetchGroupStats(groupID: groupID, subjectID: subjectID)
-                await MainActor.run { stats = s }
+                await MainActor.run {
+                    stats = s
+                    isLoadingStats = false
+                }
             } catch {
                 await MainActor.run {
                     alertMessage = error.localizedDescription
                     showAlert = true
+                    isLoadingStats = false
                 }
             }
         }
@@ -306,7 +424,10 @@ struct AttendanceQRView: View {
                         .font(.title2).bold()
                         .foregroundColor(.white)
 
-                    if let qrImage = QRCodeGenerator.generateQRCode(from: session.joinURL.replacing("localhost", with: "109.172.114.128")) {
+                    let qrSource = session.joinURL.isEmpty ? session.inviteToken : session.joinURL
+                    let qrFixed = qrSource.replacingOccurrences(of: "localhost", with: "109.172.114.128")
+
+                    if !qrFixed.isEmpty, let qrImage = QRCodeGenerator.generateQRCode(from: qrFixed) {
                         Image(uiImage: qrImage)
                             .interpolation(.none)
                             .resizable()
@@ -315,7 +436,18 @@ struct AttendanceQRView: View {
                             .background(Color.white)
                             .padding()
                     } else {
-                        Text("Ошибка создания QR-кода").foregroundColor(.red)
+                        VStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.largeTitle)
+                                .foregroundColor(.orange)
+                            Text("Не удалось создать QR-код")
+                                .foregroundColor(.white.opacity(0.8))
+                            Text(qrFixed.isEmpty ? "Токен отсутствует" : qrFixed)
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.5))
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal)
+                        }
                     }
 
                     HStack(spacing: 16) {
@@ -325,7 +457,7 @@ struct AttendanceQRView: View {
                             Text("\(session.rosterSize)")
                                 .font(.headline).bold()
                                 .foregroundColor(.white)
-                            Text("студентов")
+                            Text("студентов в группе")
                                 .font(.caption)
                                 .foregroundColor(.white.opacity(0.6))
                         }

@@ -30,7 +30,7 @@ struct UserProfile: Codable {
     }
 }
 
-struct AttendanceSession {
+struct AttendanceSession: Codable {
     let inviteToken: String
     let joinURL: String
     let lessonName: String
@@ -39,9 +39,10 @@ struct AttendanceSession {
     let rosterSize: Int
     let subjectID: Int
     let groupIDs: [Int]
+    let lessonID: String
 }
 
-struct AttendanceStudent {
+struct AttendanceStudent: Codable {
     let studentID: Int
     let studentName: String
     let attendedSessions: Int
@@ -50,7 +51,7 @@ struct AttendanceStudent {
     let lastMarkedAt: String?
 }
 
-struct AttendanceGroupStats {
+struct AttendanceGroupStats: Codable {
     let groupID: Int
     let subjectID: Int
     let sessionsCount: Int
@@ -70,12 +71,6 @@ class APIService {
         let ok: Bool
         let result: T?
         let error: String?
-    }
-
-    private func sha256hex(_ input: String) -> String {
-        let data = Data(input.utf8)
-        let hash = SHA256.hash(data: data)
-        return hash.compactMap { String(format: "%02x", $0) }.joined()
     }
 
     private func post<B: Encodable, R: Codable>(
@@ -119,7 +114,7 @@ class APIService {
         struct Result: Codable { let ok: Bool? }
         let result = try await post(
             endpoint: "/register/by-invite",
-            body: Body(invite_code: inviteCode, login: login, password: sha256hex(password)),
+            body: Body(invite_code: inviteCode, login: login, password: password),
             as: Result.self
         )
         return result?.ok ?? true
@@ -130,7 +125,7 @@ class APIService {
         struct Result: Codable { let token: String; let role: String; let user_ID: String; let login: String? }
         guard let result = try await post(
             endpoint: "/login",
-            body: Body(login: loginStr, password: sha256hex(password)),
+            body: Body(login: loginStr, password: password),
             as: Result.self
         ) else {
             throw NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "Сервер не вернул данные"])
@@ -167,6 +162,7 @@ class APIService {
             let roster_size: Int
             let subject_id: Int
             let group_ids: [Int]
+            let lesson_id: String
         }
         guard let result = try await post(
             endpoint: "/api/teacher/attendance/session",
@@ -183,7 +179,8 @@ class APIService {
             expiresMinutes: result.expires_minutes,
             rosterSize: result.roster_size,
             subjectID: result.subject_id,
-            groupIDs: result.group_ids
+            groupIDs: result.group_ids,
+            lessonID: result.lesson_id
         )
     }
 
@@ -227,6 +224,134 @@ class APIService {
                 )
             }
         )
+    }
+
+    func confirmAttendance(inviteToken: String) async throws -> Bool {
+        struct Body: Encodable { let invite_token: String }
+        struct Result: Codable { let attendance: String }
+        let result = try await post(
+            endpoint: "/api/student/attendance/confirm",
+            body: Body(invite_token: inviteToken),
+            as: Result.self
+        )
+        return result?.attendance == "confirmed"
+    }
+
+    func getActiveSession() async throws -> AttendanceSession? {
+        struct ActiveSessionItem: Codable {
+            let id: Int
+            let lesson_id: Int
+            let lesson_name: String
+            let invite_token: String?
+            let join_url: String?
+            let url: String?
+            let qr_payload: String?
+            let expires_at: String
+            let expires_minutes: Int?
+            let roster_size: Int
+            let subject_id: Int
+            let teacher_id: Int
+            let marked_count: Int
+            let attendance_percent: Double
+            let remaining_seconds: Int
+            let seconds_remaining: Int
+            let is_active: Bool
+        }
+
+        struct ActiveSessionResult: Codable {
+            let active: Bool?
+            let remaining_seconds: Int?
+            let seconds_remaining: Int?
+            let server_time: String?
+            let timezone: String?
+            let session: ActiveSessionItem?
+        }
+
+        guard let url = URL(string: "\(baseURL)/api/teacher/attendance/session/active") else {
+            throw URLError(.badURL)
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        if let token = token {
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+
+        let (data, httpResp) = try await URLSession.shared.data(for: req)
+        let statusCode = (httpResp as? HTTPURLResponse)?.statusCode ?? 0
+
+        guard statusCode == 200 else { return nil }
+
+        guard let outer = try? JSONDecoder().decode(ServerResponse<ActiveSessionResult>.self, from: data),
+              outer.ok,
+              let result = outer.result,
+              result.active == true,
+              let s = result.session,
+              s.is_active else { return nil }
+
+        let resolvedToken = s.invite_token ?? ""
+
+        let resolvedURL: String
+        if let ju = s.join_url, !ju.isEmpty {
+            resolvedURL = ju.replacingOccurrences(of: "localhost", with: "109.172.114.128")
+        } else if let qr = s.qr_payload, !qr.isEmpty {
+            resolvedURL = qr.replacingOccurrences(of: "localhost", with: "109.172.114.128")
+        } else if let u = s.url, !u.isEmpty {
+            resolvedURL = u.replacingOccurrences(of: "localhost", with: "109.172.114.128")
+        } else if !resolvedToken.isEmpty {
+            resolvedURL = "http://109.172.114.128:9000/attendance/join?token=\(resolvedToken)"
+        } else {
+            return nil
+        }
+
+        let secs = s.remaining_seconds > 0 ? s.remaining_seconds : s.seconds_remaining
+
+        return AttendanceSession(
+            inviteToken: resolvedToken,
+            joinURL: resolvedURL,
+            lessonName: s.lesson_name,
+            expiresAt: s.expires_at,
+            expiresMinutes: s.expires_minutes ?? (secs / 60),
+            rosterSize: s.roster_size,
+            subjectID: s.subject_id,
+            groupIDs: [],
+            lessonID: String(s.lesson_id)
+        )
+    }
+
+    func getMarkedCount(lessonId: Int) async throws -> (marked: Int, roster: Int, percent: Double) {
+        struct Result: Codable {
+            let lesson_id: Int
+            let marked_count: Int
+            let roster_size: Int
+            let attendance_percent: Double
+        }
+        guard let result = try await get(
+            endpoint: "/api/teacher/attendance/session/marked-count?lesson_id=\(lessonId)",
+            as: Result.self
+        ) else {
+            throw NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "Нет данных о сессии"])
+        }
+        return (result.marked_count, result.roster_size, result.attendance_percent)
+    }
+
+    func getSessionTimer(lessonId: Int) async throws -> (secondsRemaining: Int, isActive: Bool) {
+        struct Result: Codable {
+            let expires_at: String
+            let server_time: String
+            let remaining_seconds: Int
+            let seconds_remaining: Int
+            let is_active: Bool
+            let lesson_id: Int
+            let timezone: String
+        }
+        guard let result = try await get(
+            endpoint: "/api/teacher/attendance/session/timer?lesson_id=\(lessonId)",
+            as: Result.self
+        ) else {
+            throw NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "Нет данных о таймере"])
+        }
+        let seconds = result.remaining_seconds > 0 ? result.remaining_seconds : result.seconds_remaining
+        return (seconds, result.is_active)
     }
 
     func logout() {

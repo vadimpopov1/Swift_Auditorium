@@ -8,6 +8,8 @@
 import SwiftUI
 import CoreImage
 import AVFoundation
+import CryptoKit
+import UIKit
 
 enum AuthScreen {
     case login, register
@@ -145,6 +147,9 @@ struct MainAppView: View {
 
     @State private var showingScanner = false
     @State private var showLogoutConfirm = false
+    @State private var showAttendanceAlert = false
+    @State private var attendanceAlertMessage = ""
+    @State private var attendanceAlertSuccess = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -177,14 +182,43 @@ struct MainAppView: View {
         .fullScreenCover(isPresented: $showingScanner) {
             QRScannerView(onCodeScanned: { scannedCode in
                 showingScanner = false
-                if let url = URL(string: scannedCode) {
-                    UIApplication.shared.open(url)
-                }
+                handleScannedCode(scannedCode)
             })
         }
         .confirmationDialog("Выйти из аккаунта?", isPresented: $showLogoutConfirm, titleVisibility: .visible) {
             Button("Выйти", role: .destructive) { onLogout() }
             Button("Отмена", role: .cancel) {}
+        }
+        .alert(attendanceAlertSuccess ? "Успех" : "Ошибка", isPresented: $showAttendanceAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(attendanceAlertMessage)
+        }
+    }
+
+    private func handleScannedCode(_ code: String) {
+        var token = code
+        if let url = URL(string: code),
+           let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+           let tokenValue = components.queryItems?.first(where: { $0.name == "token" })?.value {
+            token = tokenValue
+        }
+
+        Task {
+            do {
+                let success = try await APIService.shared.confirmAttendance(inviteToken: token)
+                await MainActor.run {
+                    attendanceAlertSuccess = success
+                    attendanceAlertMessage = success ? "Посещение отмечено!" : "Не удалось отметить посещение"
+                    showAttendanceAlert = true
+                }
+            } catch {
+                await MainActor.run {
+                    attendanceAlertSuccess = false
+                    attendanceAlertMessage = error.localizedDescription
+                    showAttendanceAlert = true
+                }
+            }
         }
     }
 }
@@ -192,6 +226,16 @@ struct MainAppView: View {
 struct ProfileCardView: View {
     let profile: UserProfile
     let onLogout: () -> Void
+
+    private var deviceIdentifier: String {
+        guard let raw = UIDevice.current.identifierForVendor?.uuidString else {
+            return "Недоступно"
+        }
+        let cleaned = raw.replacingOccurrences(of: "-", with: "").lowercased()
+        let hashData = SHA256.hash(data: Data(cleaned.utf8))
+        let hashString = hashData.compactMap { String(format: "%02x", $0) }.joined()
+        return String(hashString.prefix(16))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -238,6 +282,24 @@ struct ProfileCardView: View {
                 Text(profile.userID)
                     .font(.subheadline).bold()
                     .foregroundColor(.primary)
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Image(systemName: "iphone.circle.fill")
+                        .foregroundColor(.orange.opacity(0.7))
+                    Text("ID устройства:")
+                        .foregroundColor(.secondary)
+                        .font(.subheadline)
+                    Spacer()
+                }
+                Text(deviceIdentifier)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundColor(.primary)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.7)
             }
         }
         .padding(16)
